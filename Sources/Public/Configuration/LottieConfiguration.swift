@@ -45,3 +45,14 @@ public struct LottieConfiguration: Hashable {
   ///  - Defaults to `CGColorSpaceCreateDeviceRGB()`
   public var colorSpace: CGColorSpace
 }
+
+extension LottieConfiguration {
+  /// Override the default engine to avoid CA regressions on iOS 18
+  public static var shared: LottieConfiguration = {
+    var config = LottieConfiguration()
+    if #available(iOS 18.0, *) {
+      config.renderingEngine = .mainThread
+    }
+    return config
+  }()
+}

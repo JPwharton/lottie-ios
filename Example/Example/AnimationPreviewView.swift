@@ -53,9 +53,7 @@ struct AnimationPreviewView: View {
         LoadingIndicator()
           .frame(width: 50, height: 50)
       }
-      .configuration(
-        LottieConfiguration(enginePreference: renderingEngine)
-      )
+      .configuration(LottieConfiguration(renderingEngine: renderingEngine))
       .imageProvider(.exampleAppSampleImages)
       .logger(.printToConsole)
       .resizable()
@@ -115,12 +113,13 @@ struct AnimationPreviewView: View {
   @State private var animationPlaying = true
   @State private var sliderValue: AnimationProgressTime = 0
   @State private var currentURLIndex: Int
-  @State private var renderingEngine: RenderingEnginePreference = .automatic
-  @State private var loopMode: LottieLoopMode = .loop
+  @State private var renderingEngine = RenderingEngineOption.automatic
+  @State private var loopMode = LottieLoopMode.loop
   @State private var playFromProgress: AnimationProgressTime = 0
   @State private var playToProgress: AnimationProgressTime = 1
   @State private var currentRenderingEngine: RenderingEngine?
 
+  /// Used for remote animations only, when more than one URL is provided we loop over the urls every 2 seconds.
   private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
   private let urls: [URL]
 
@@ -250,161 +249,5 @@ struct LoadingIndicator: View {
       .onAppear {
         animating = true
       }
-  }
-}
-
-
-import Foundation
-import QuartzCore
-import UIKit
-import Lottie
-
-// MARK: - Engine Preference
-
-/// Select which engine Lottie should use.
-public enum RenderingEnginePreference {
-  case automatic      // Probe Core Animation, fallback to MainThread
-  case coreAnimation  // Force CA-only
-  case mainThread     // Force software-driven
-}
-
-// MARK: - Lottie Configuration Extension
-
-extension LottieConfiguration {
-  /// Initialize with engine preference; default config applied for other settings.
-  public init(enginePreference: RenderingEnginePreference) {
-    self.init()
-    self.enginePreference = enginePreference
-  }
-
-  /// Expose engine preference on config
-  public var enginePreference: RenderingEnginePreference {
-    get { // read stored user info or default
-      (userInfo["enginePreference"] as? RenderingEnginePreference) ?? .automatic
-    }
-    set {
-      userInfo["enginePreference"] = newValue
-    }
-  }
-}
-
-// MARK: - AnimationEngine Protocol
-
-/// Defines a pluggable animation engine.
-protocol AnimationEngine {
-  func play(
-    animation: Animation,
-    on layer: CALayer,
-    loopMode: LottieLoopMode,
-    completion: @escaping (Bool) -> Void
-  )
-}
-
-// MARK: - RenderingPipeline
-
-/// Tries `preferred` first, then falls back on `fallback` if needed.
-final class RenderingPipeline {
-  private let preferred: AnimationEngine
-  private let fallback: AnimationEngine
-
-  init(preferred: AnimationEngine, fallback: AnimationEngine) {
-    self.preferred = preferred
-    self.fallback  = fallback
-  }
-
-  func play(
-    animation: Animation,
-    on layer: CALayer,
-    loopMode: LottieLoopMode,
-    completion: @escaping (Bool) -> Void
-  ) {
-    preferred.play(animation: animation, on: layer, loopMode: loopMode) { succeeded in
-      guard !(!succeeded && case .automatic = LottieConfiguration.shared.enginePreference) else {
-        fallback.play(animation: animation, on: layer, loopMode: loopMode, completion: completion)
-        return
-      }
-      completion(succeeded)
-    }
-  }
-}
-
-// MARK: - Core Animation Engine
-
-/// Uses CAKeyframeAnimation + CALayer for GPU-driven playback.
-final class CoreAnimationEngine: AnimationEngine {
-  func play(
-    animation: Animation,
-    on layer: CALayer,
-    loopMode: LottieLoopMode,
-    completion: @escaping (Bool) -> Void
-  ) {
-    // 1) Build a CAKeyframeAnimation from Lottie animation data
-    let keyframeAnimation = animation.keyframeAnimation(
-      keypath: animation.keypath,
-      loopMode: loopMode
-    )
-
-    // 2) Add to layer
-    layer.add(keyframeAnimation, forKey: "lottieAnimation")
-
-    // 3) Probe for stall after 50ms
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-      if let offset = layer.presentation()?.timeOffset, offset > 0 {
-        completion(true)
-      } else {
-        layer.removeAnimation(forKey: "lottieAnimation")
-        completion(false)
-      }
-    }
-  }
-}
-
-// MARK: - Main Thread Engine
-
-/// Drives Lottie frames on CADisplayLink (software fallback).
-final class MainThreadEngine: AnimationEngine {
-  private var displayLink: CADisplayLink?
-  private var startTime: CFTimeInterval = 0
-  private var completionBlock: ((Bool) -> Void)?
-  private var loopMode: LottieLoopMode = .playOnce
-
-  func play(
-    animation: Animation,
-    on layer: CALayer,
-    loopMode: LottieLoopMode,
-    completion: @escaping (Bool) -> Void
-  ) {
-    self.loopMode = loopMode
-    completionBlock = completion
-    startTime = CACurrentMediaTime()
-
-    // Create display link
-    displayLink = CADisplayLink(target: self, selector: #selector(tick))
-    displayLink?.add(to: .main, forMode: .common)
-  }
-
-  @objc private func tick(link: CADisplayLink) {
-    guard let animation = link.userInfo?["animation"] as? Animation,
-          let layer = link.userInfo?["layer"] as? CALayer else {
-      stop()
-      return
-    }
-
-    let elapsed = CACurrentMediaTime() - startTime
-    let progress = (elapsed.truncatingRemainder(dividingBy: animation.duration)) / animation.duration
-
-    // Render frame at `progress` into CALayer
-    animation.renderFrame(at: progress, into: layer)
-
-    // If non-looping and reached end
-    if loopMode == .playOnce && elapsed >= animation.duration {
-      stop()
-      completionBlock?(true)
-    }
-  }
-
-  private func stop() {
-    displayLink?.invalidate()
-    displayLink = nil
   }
 }

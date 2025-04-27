@@ -22,10 +22,6 @@ public struct LottieConfiguration: Hashable {
 
   // MARK: Public
 
-  /// The global configuration of Lottie,
-  /// which applies to all `LottieAnimationView`s by default.
-  public static var shared = LottieConfiguration()
-
   /// The rendering engine implementation to use when displaying an animation
   ///  - Defaults to `RenderingEngineOption.automatic`, which uses the
   ///    Core Animation rendering engine for supported animations, and
